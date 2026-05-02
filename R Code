@@ -1,0 +1,226 @@
+# --- 0. REQUIRED PACKAGES ---
+# Run this in console if needed: install.packages(c("shiny", "shinydashboard", "dplyr", "ggplot2", "readr", "tidyr"))
+
+library(shiny)
+library(shinydashboard)
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(tidyr)
+
+# --- 1. ENHANCED SMART DATA LOADING ---
+load_or_mock_data <- function() {
+  # If you use your real CSV later, ensure it has these column names
+  set.seed(42) # For consistent mock data
+  
+  mock_df <- data.frame(
+    Employee_ID = paste0("EMP-", 1001:1200),
+    Department = sample(c("IT", "HR", "Finance", "Operations", "Sales"), 200, replace = TRUE),
+    Quiz_Score = round(rnorm(200, mean = 75, sd = 15), 0),
+    Clicked_Phishing = sample(c(0, 1), 200, replace = TRUE, prob = c(0.85, 0.15)), 
+    Compliance_Status = sample(c("Compliant", "Non-Compliant"), 200, replace = TRUE, prob = c(0.80, 0.20)),
+    Training_Completed = sample(c("Yes", "No"), 200, replace = TRUE, prob = c(0.88, 0.12))
+  ) %>%
+    # Add logic: if they failed training or clicked phishing, they are higher risk
+    mutate(
+      Quiz_Score = ifelse(Quiz_Score > 100, 100, ifelse(Quiz_Score < 0, 0, Quiz_Score)),
+      Risk_Profile = case_when(
+        Clicked_Phishing == 1 & Quiz_Score < 70 ~ "High Risk",
+        Clicked_Phishing == 1 | Quiz_Score < 70 ~ "Medium Risk",
+        TRUE ~ "Low Risk"
+      )
+    )
+  
+  return(mock_df)
+}
+
+phishing_data <- load_or_mock_data()
+
+# --- 2. USER INTERFACE (UI) ---
+ui <- dashboardPage(
+  skin = "blue",
+  dashboardHeader(title = "Cyber Awareness Tracker", titleWidth = 300),
+  
+  dashboardSidebar(
+    width = 300,
+    sidebarMenu(
+      menuItem("Executive Dashboard", tabName = "overview", icon = icon("tachometer-alt")),
+      menuItem("Phishing Intelligence", tabName = "phishing", icon = icon("user-secret")),
+      menuItem("Training & Assessment", tabName = "training", icon = icon("graduation-cap")),
+      menuItem("Compliance & Risk", tabName = "compliance", icon = icon("shield-alt")),
+      menuItem("Remediation Center", tabName = "action", icon = icon("clipboard-list"))
+    )
+  ),
+  
+  dashboardBody(
+    tabItems(
+      # Tab 1: Executive Dashboard
+      tabItem(tabName = "overview",
+              h2("Organizational Security Posture"),
+              fluidRow(
+                valueBoxOutput("totalEmployees", width = 3),
+                valueBoxOutput("avgQuizScore", width = 3),
+                valueBoxOutput("phishingClickRate", width = 3),
+                valueBoxOutput("highRiskCount", width = 3)
+              ),
+              fluidRow(
+                box(title = "Departmental Risk Overview", status = "primary", solidHeader = TRUE,
+                    plotOutput("riskPlot", height = "300px"), width = 12)
+              )
+      ),
+      
+      # Tab 2: Phishing Intelligence
+      tabItem(tabName = "phishing",
+              h2("Simulated Phishing Campaigns"),
+              fluidRow(
+                box(title = "Vulnerability by Department", status = "warning", solidHeader = TRUE,
+                    plotOutput("phishingPlot", height = "400px"), width = 8),
+                box(title = "Campaign Insights", status = "warning", solidHeader = TRUE,
+                    h4("Current Focus:"),
+                    p("The latest simulation mimicked an 'Urgent IT Password Reset' email. Departments with click rates above 10% require targeted intervention."),
+                    plotOutput("phishingPie", height = "250px"), width = 4)
+              )
+      ),
+      
+      # Tab 3: Training & Assessment
+      tabItem(tabName = "training",
+              h2("Security Awareness Training"),
+              fluidRow(
+                box(title = "Quiz Score Distribution", status = "success", solidHeader = TRUE,
+                    plotOutput("quizPlot", height = "350px"), width = 8),
+                box(title = "Module Completion", status = "success", solidHeader = TRUE,
+                    plotOutput("completionPlot", height = "350px"), width = 4)
+              )
+      ),
+      
+      # Tab 4: Compliance & Risk
+      tabItem(tabName = "compliance",
+              h2("Policy Compliance Status"),
+              fluidRow(
+                box(title = "Compliance Status by Department", status = "primary", solidHeader = TRUE,
+                    plotOutput("compliancePlot", height = "400px"), width = 12)
+              )
+      ),
+      
+      # Tab 5: Remediation Center (Actionable Data Table)
+      tabItem(tabName = "action",
+              h2("Remediation & Action Center"),
+              p("List of employees requiring immediate follow-up for missing training or failing recent simulations."),
+              fluidRow(
+                box(title = "High Risk & Non-Compliant Employees", status = "danger", solidHeader = TRUE,
+                    dataTableOutput("actionTable"), width = 12)
+              )
+      )
+    )
+  )
+)
+
+# --- 3. SERVER LOGIC ---
+server <- function(input, output) {
+  
+  # --- KPI Boxes ---
+  output$totalEmployees <- renderValueBox({
+    valueBox(nrow(phishing_data), "Employees Tracked", icon = icon("users"), color = "blue")
+  })
+  
+  output$avgQuizScore <- renderValueBox({
+    avg_score <- round(mean(phishing_data$Quiz_Score, na.rm = TRUE), 1)
+    valueBox(paste0(avg_score, "%"), "Avg. Quiz Score", icon = icon("check-circle"), color = "green")
+  })
+  
+  output$phishingClickRate <- renderValueBox({
+    click_rate <- round((sum(phishing_data$Clicked_Phishing == 1) / nrow(phishing_data)) * 100, 1)
+    valueBox(paste0(click_rate, "%"), "Phishing Click Rate", icon = icon("mouse-pointer"), color = "red")
+  })
+  
+  output$highRiskCount <- renderValueBox({
+    high_risk <- sum(phishing_data$Risk_Profile == "High Risk")
+    valueBox(high_risk, "High Risk Employees", icon = icon("exclamation-triangle"), color = "orange")
+  })
+  
+  # --- Plots ---
+  
+  # 1. Risk Plot (Overview Tab)
+  output$riskPlot <- renderPlot({
+    phishing_data %>%
+      count(Department, Risk_Profile) %>%
+      ggplot(aes(x = reorder(Department, -n), y = n, fill = factor(Risk_Profile, levels = c("High Risk", "Medium Risk", "Low Risk")))) +
+      geom_bar(stat = "identity", position = "stack", color = "black", alpha = 0.8) +
+      theme_minimal(base_size = 14) +
+      labs(x = "Department", y = "Employee Count", fill = "Risk Profile") +
+      scale_fill_manual(values = c("High Risk" = "#dc3545", "Medium Risk" = "#ffc107", "Low Risk" = "#28a745"))
+  })
+  
+  # 2. Phishing Bar Plot
+  output$phishingPlot <- renderPlot({
+    phishing_data %>%
+      group_by(Department) %>%
+      summarise(Clicked = sum(Clicked_Phishing == 1),
+                Ignored = sum(Clicked_Phishing == 0)) %>%
+      pivot_longer(cols = c(Clicked, Ignored), names_to = "Result", values_to = "Count") %>%
+      ggplot(aes(x = reorder(Department, -Count), y = Count, fill = Result)) +
+      geom_bar(stat = "identity", position = "dodge", color = "black", alpha = 0.8) +
+      theme_minimal(base_size = 14) +
+      labs(x = "Department", y = "Simulations Sent", fill = "Action Taken") +
+      scale_fill_manual(values = c("Clicked" = "#dc3545", "Ignored" = "#17a2b8"))
+  })
+  
+  # 3. Phishing Pie Chart
+  output$phishingPie <- renderPlot({
+    phishing_data %>%
+      count(Clicked_Phishing) %>%
+      mutate(Label = ifelse(Clicked_Phishing == 1, "Clicked", "Ignored")) %>%
+      ggplot(aes(x = "", y = n, fill = Label)) +
+      geom_bar(stat = "identity", width = 1, color = "white") +
+      coord_polar("y", start = 0) +
+      theme_void(base_size = 14) +
+      scale_fill_manual(values = c("Clicked" = "#dc3545", "Ignored" = "#17a2b8")) +
+      labs(fill = "")
+  })
+  
+  # 4. Quiz Plot (Boxplot to show spread)
+  output$quizPlot <- renderPlot({
+    ggplot(phishing_data, aes(x = Department, y = Quiz_Score, fill = Department)) +
+      geom_boxplot(alpha = 0.7) +
+      theme_minimal(base_size = 14) +
+      labs(x = "Department", y = "Quiz Score (%)") +
+      theme(legend.position = "none")
+  })
+  
+  # 5. Completion Plot
+  output$completionPlot <- renderPlot({
+    phishing_data %>%
+      count(Training_Completed) %>%
+      ggplot(aes(x = Training_Completed, y = n, fill = Training_Completed)) +
+      geom_bar(stat = "identity", color = "black", width = 0.5) +
+      theme_minimal(base_size = 14) +
+      labs(x = "Completed?", y = "Count") +
+      scale_fill_manual(values = c("Yes" = "#28a745", "No" = "#6c757d")) +
+      theme(legend.position = "none")
+  })
+  
+  # 6. Compliance Plot
+  output$compliancePlot <- renderPlot({
+    phishing_data %>%
+      count(Department, Compliance_Status) %>%
+      ggplot(aes(x = reorder(Department, -n), y = n, fill = Compliance_Status)) +
+      geom_bar(stat = "identity", position = "dodge", color = "black") +
+      theme_minimal(base_size = 14) +
+      labs(x = "Department", y = "Employee Count", fill = "Status") +
+      scale_fill_manual(values = c("Compliant" = "#28a745", "Non-Compliant" = "#dc3545"))
+  })
+  
+  # --- Data Table (Remediation Center) ---
+  output$actionTable <- renderDataTable({
+    # Filter for employees who need attention
+    action_data <- phishing_data %>%
+      filter(Compliance_Status == "Non-Compliant" | Risk_Profile == "High Risk" | Training_Completed == "No") %>%
+      select(Employee_ID, Department, Risk_Profile, Quiz_Score, Training_Completed, Compliance_Status) %>%
+      arrange(Risk_Profile)
+    
+    action_data
+  }, options = list(pageLength = 10, scrollX = TRUE))
+}
+
+# --- 4. RUN APP ---
+shinyApp(ui, server)
